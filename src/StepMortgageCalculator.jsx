@@ -867,7 +867,7 @@ export default function StepMortgageCalculator() {
                     <th className="py-2 px-2 font-normal text-right">Saldo akhir</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody class="divide-y">
                   {result?.stepSummaries.map((s) => (
                     <tr key={s.step} style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
                       <td className="py-2 px-2 text-center" style={{ fontFamily: "Fraunces, serif", color: BRASS }}>
