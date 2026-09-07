@@ -219,10 +219,10 @@ export default function StepMortgageCalculator() {
   const [showSchedule, setShowSchedule] = useState(false);
   const [takeoverEnabled, setTakeoverEnabled] = useState(false);
   const [oldRate, setOldRate] = useState(9);
-  const [oldTermMonths, setOldTermMonths] = useState(360);
+  const [oldTermMonths, setOldTermMonths] = useState(100);
   const [customPlafon, setCustomPlafon] = useState(false);
   const [oldPlafon, setOldPlafon] = useState(300000);
-  const [takeoverFee, setTakeoverFee] = useState(0);
+  const [takeoverFee, setTakeoverFee] = useState(50000000);
 
   const updateStep = (id, patch) => {
     setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
