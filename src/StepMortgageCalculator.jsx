@@ -456,10 +456,13 @@ export default function StepMortgageCalculator() {
       <div className="max-w-fit mx-auto px-6 py-10">
         <header className="mb-10 max-w-xl">
           <h1 style={{ fontFamily: "Fraunces, serif" }} className="text-4xl mb-3">
-            Kalkulator KPR · Consumer Loan Group (CSL)
+            Kalkulator KPR
           </h1>
+          <h4 style={{ fontFamily: "Fraunces, serif" }} className="text-4xl mb-3">
+            Consumer Loan Group (CSL)
+            </h4>
           <p style={{ color: INK_SOFT }} className="text-sm leading-relaxed">
-            Simulasi Kredit KPR dengan program disesuaikan. Made with ❤️ Ditra
+            Simulasi Kredit KPR dengan program disesuaikan · Made with ❤️ Ditra
           </p>
         </header>
 
@@ -855,27 +858,27 @@ export default function StepMortgageCalculator() {
               <table className="max-w-fit text-sm">
                 <thead>
                   <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${HAIRLINE}` }} className="text-left">
-                    <th className="py-2 font-normal">Tahap</th>
-                    <th className="py-2 font-normal">Bulan</th>
-                    <th className="py-2 font-normal">Bunga</th>
-                    <th className="py-2 font-normal">Cicilan</th>
-                    <th className="py-2 font-normal text-right">Bunga terbayar</th>
-                    <th className="py-2 font-normal text-right">Pokok terbayar</th>
-                    <th className="py-2 font-normal text-right">Saldo akhir</th>
+                    <th className="py-2 px-2 font-normal">Tahap</th>
+                    <th className="py-2 px-2 font-normal">Bulan</th>
+                    <th className="py-2 px-2 font-normal">Bunga</th>
+                    <th className="py-2 px-2 font-normal">Cicilan</th>
+                    <th className="py-2 px-2 font-normal text-right">Bunga terbayar</th>
+                    <th className="py-2 px-2 font-normal text-right">Pokok terbayar</th>
+                    <th className="py-2 px-2 font-normal text-right">Saldo akhir</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result?.stepSummaries.map((s) => (
                     <tr key={s.step} style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
-                      <td className="py-2" style={{ fontFamily: "Fraunces, serif", color: BRASS }}>
+                      <td className="py-2 px-2 text-center" style={{ fontFamily: "Fraunces, serif", color: BRASS }}>
                         {s.step}
                       </td>
-                      <td className="py-2">{s.months}</td>
-                      <td className="py-2">{fmtPct(s.rate)}</td>
-                      <td className="py-2">{fmtMoney(symbol, s.payment)}</td>
-                      <td className="py-2 text-right">{fmtMoney(symbol, s.interest)}</td>
-                      <td className="py-2 text-right">{fmtMoney(symbol, s.principal)}</td>
-                      <td className="py-2 text-right">{fmtMoney(symbol, s.endBalance)}</td>
+                      <td className="py-2 px-2">{s.months}</td>
+                      <td className="py-2 px-2">{fmtPct(s.rate)}</td>
+                      <td className="py-2 px-2">{fmtMoney(symbol, s.payment)}</td>
+                      <td className="py-2 px-2 text-right">{fmtMoney(symbol, s.interest)}</td>
+                      <td className="py-2 px-2 text-right">{fmtMoney(symbol, s.principal)}</td>
+                      <td className="py-2 px-2 text-right">{fmtMoney(symbol, s.endBalance)}</td>
                     </tr>
                   ))}
                 </tbody>
