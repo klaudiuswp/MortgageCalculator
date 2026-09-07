@@ -354,11 +354,25 @@ export default function StepMortgageCalculator() {
     let runningOld = 0;
     let runningNew = fee;
 
+    // for (let t = 1; t <= horizon; t++) {
+    //   if (t <= oldMonths) runningOld += oldPayment;
+    //   cumOld.push(runningOld);
+
+    //   if (t <= result.totalMonths) runningNew += result.rows[t - 1].payment;
+    //   cumNew.push(runningNew);
+    // }
     for (let t = 1; t <= horizon; t++) {
       if (t <= oldMonths) runningOld += oldPayment;
       cumOld.push(runningOld);
 
-      if (t <= result.totalMonths) runningNew += result.rows[t - 1].payment;
+      if (t <= result.totalMonths) {
+        runningNew += result.rows[t - 1].payment;
+        // if the schedule ends with a non-zero balance, treat it as a lump-sum
+        // payoff added on the final month — same convention used in the IRR calc
+        if (t === result.totalMonths && Math.abs(result.endingBalance) > 1) {
+          runningNew += result.endingBalance;
+        }
+      }
       cumNew.push(runningNew);
     }
 
@@ -460,7 +474,7 @@ export default function StepMortgageCalculator() {
           </h1>
           <h4 style={{ fontFamily: "Fraunces, serif" }} className="text-4xl mb-3">
             Consumer Loan Group (CSL)
-            </h4>
+          </h4>
           <p style={{ color: INK_SOFT }} className="text-sm leading-relaxed">
             Simulasi Kredit KPR dengan program disesuaikan · Made with ❤️ Claude
           </p>
@@ -751,9 +765,12 @@ export default function StepMortgageCalculator() {
 
             {takeover && (
               <div className="mb-10">
-                <h2 className="text-xs mb-4" style={{ color: INK_SOFT }}>
+                <h2 className="text-xs mb-1" style={{ color: INK_SOFT }}>
                   Total pembayaran kumulatif: skema baru vs skema lama
                 </h2>
+                <p className="text-xs mb-4" style={{ color: INK_SOFT }}>
+                  Kumulatif cicilan penuh (pokok + bunga) yang telah dibayarkan, bukan pokok saja.
+                </p>
                 <ResponsiveContainer width="100%" height={220}>
                   <LineChart data={takeoverChartData}>
                     <CartesianGrid stroke={HAIRLINE} vertical={false} />
@@ -800,13 +817,13 @@ export default function StepMortgageCalculator() {
                     <>
                       Titik temu pertama sekitar bulan{" "}
                       <span style={{ color: INK }}>{Math.round(takeover.firstMeetMonth)}</span>{" "}
-                      ({(takeover.firstMeetMonth / 12).toFixed(1)} tahun), saat total pembayaran kumulatif
+                      ({(takeover.firstMeetMonth / 12).toFixed(1)} tahun), saat total pembayaran kumulatif (pokok + bunga)
                       sekitar {fmtMoney(symbol, takeover.firstMeetValue)}.
                       {Math.abs(takeover.lastMeetMonth - takeover.firstMeetMonth) > 0.5 && (
                         <>
                           {" "}Kedua skema bertemu lagi sekitar bulan{" "}
                           <span style={{ color: INK }}>{Math.round(takeover.lastMeetMonth)}</span>{" "}
-                          ({(takeover.lastMeetMonth / 12).toFixed(1)} tahun), saat total pembayaran kumulatif
+                          ({(takeover.lastMeetMonth / 12).toFixed(1)} tahun), saat total pembayaran kumulatif (pokok + bunga)
                           sekitar {fmtMoney(symbol, takeover.lastMeetValue)}.
                         </>
                       )}
@@ -814,14 +831,14 @@ export default function StepMortgageCalculator() {
                   )}
                   {takeover.status === "still-below" && (
                     <>
-                      Skema baru tetap lebih hemat secara kumulatif dibanding skema lama sepanjang{" "}
+                      Skema baru tetap lebih hemat secara kumulatif (pokok + bunga) dibanding skema lama sepanjang{" "}
                       {takeover.horizon} bulan yang disimulasikan — kedua garis belum pernah bertemu dalam jangka
                       waktu ini.
                     </>
                   )}
                   {takeover.status === "always-above" && (
                     <>
-                      Total pembayaran skema baru sudah lebih tinggi dari skema lama sejak awal dan tidak
+                      Total pembayaran skema baru (pokok + bunga) sudah lebih tinggi dari skema lama sejak awal dan tidak
                       pernah bertemu — skema lama secara kumulatif selalu lebih hemat.
                     </>
                   )}
@@ -837,7 +854,7 @@ export default function StepMortgageCalculator() {
                       <div className="text-right">{fmtMoney(symbol, takeover.oldPrincipal)}</div>
                     </>
                   )}
-                  <div style={{ color: INK_SOFT }}>Total skema lama ({takeover.oldMonths} bulan)</div>
+                  <div style={{ color: INK_SOFT }}>Total skema lama, pokok + bunga ({takeover.oldMonths} bulan)</div>
                   <div className="text-right">{fmtMoney(symbol, takeover.oldTotal)}</div>
                   {takeover.fee > 0 && (
                     <>
@@ -845,8 +862,15 @@ export default function StepMortgageCalculator() {
                       <div className="text-right">{fmtMoney(symbol, takeover.fee)}</div>
                     </>
                   )}
-                  <div style={{ color: INK_SOFT }}>Total skema baru ({result.totalMonths} bulan)</div>
-                  <div className="text-right">{fmtMoney(symbol, takeover.newTotalAtHorizon)}</div>
+                  <div style={{ color: INK_SOFT }}>Total skema baru, pokok + bunga ({result.totalMonths} bulan)</div>
+                  <div className="text-right">
+                    {fmtMoney(symbol, takeover.newTotalAtHorizon)}
+                    {hasBalloon && (
+                      <div className="text-xs mt-0.5" style={{ color: RUST }}>
+                        termasuk pelunasan sisa saldo {fmtMoney(symbol, result.endingBalance)}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
