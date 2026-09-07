@@ -456,12 +456,10 @@ export default function StepMortgageCalculator() {
       <div className="max-w-fit mx-auto px-6 py-10">
         <header className="mb-10 max-w-xl">
           <h1 style={{ fontFamily: "Fraunces, serif" }} className="text-4xl mb-3">
-            Buku Besar KPR Bertahap
+            Kalkulator KPR · Consumer Loan Group (CSL)
           </h1>
           <p style={{ color: INK_SOFT }} className="text-sm leading-relaxed">
-            Simulasikan KPR yang dilunasi dalam hingga tujuh tahap pembayaran, lalu
-            hitung tingkat pengembalian internal (IRR) bagi pemberi pinjaman dari
-            arus kas yang dihasilkan.
+            Simulasi Kredit KPR dengan program disesuaikan. Made with ❤️ Ditra
           </p>
         </header>
 
@@ -679,21 +677,14 @@ export default function StepMortgageCalculator() {
                     style={{ fontFamily: "Fraunces, serif", color: BRASS }}
                     className="text-6xl leading-none"
                   >
-                    {fmtPct(result.effectiveAnnual)}
+                    {fmtPct(result.annualIRRFromYearlyBuckets)}
                   </div>
                   <div className="text-sm mt-3" style={{ color: INK_SOFT }}>
-                    IRR efektif tahunan bagi pemberi pinjaman
+                    IRR tahunan bagi pemberi pinjaman
                   </div>
                   <div className="text-xs mt-1" style={{ color: INK_SOFT }}>
-                    {fmtPct(result.monthlyIRR * 100, 4)} per bulan · {fmtPct(result.nominalAnnual)} nominal tahunan
+                    {fmtPct(result.monthlyIRR * 100, 4)} per bulan · {fmtPct(result.nominalAnnual)} nominal tahunan · {fmtPct(result.effectiveAnnual)} effective IRR
                   </div>
-                  {result.annualIRRFromYearlyBuckets !== null && (
-                    <div className="text-xs mt-1" style={{ color: INK_SOFT }}>
-                      {fmtPct(result.annualIRRFromYearlyBuckets)} bila arus kas dijumlah per tahun lalu IRR
-                      dihitung langsung per tahun (cara umum dipakai di Excel — angsuran 12 bulan
-                      digabung jadi satu nilai per tahun, bukan dihitung bulanan lalu disetahunkan)
-                    </div>
-                  )}
                 </>
               ) : (
                 <div className="text-sm" style={{ color: INK_SOFT }}>
