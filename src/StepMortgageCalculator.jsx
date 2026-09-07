@@ -366,7 +366,7 @@ export default function StepMortgageCalculator() {
     <div style={{ background: PAPER, color: INK, minHeight: "100vh" }} className="font-mono">
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');`}</style>
 
-      <div className="max-w-6xl mx-auto px-6 py-10">
+      <div className="max-w-fit mx-auto px-6 py-10">
         <header className="mb-10 max-w-xl">
           <h1 style={{ fontFamily: "Fraunces, serif" }} className="text-4xl mb-3">
             Buku Besar KPR Bertahap
