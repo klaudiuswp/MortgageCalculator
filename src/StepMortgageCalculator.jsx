@@ -855,8 +855,8 @@ export default function StepMortgageCalculator() {
               <h2 className="text-xs mb-4" style={{ color: INK_SOFT }}>
                 Ringkasan tahap
               </h2>
-              <table className="max-w-fit text-xs border-collapse">
-                <thead>
+              <table className="w-full text-xs border-collapse">
+                <thead style={{ position: "sticky", top: 0, background: PAPER_RAISED }}>
                   {/* <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${HAIRLINE}` }} className="text-left border-b"> */}
                   <tr className="text-left border-b" style={{ color: INK_SOFT, borderColor: HAIRLINE }}>
                     <th className="py-2 px-2 font-normal">Tahap</th>
