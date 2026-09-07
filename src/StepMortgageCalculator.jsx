@@ -1,0 +1,848 @@
+import React, { useState, useMemo } from "react";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine,
+} from "recharts";
+import { Plus, Trash2, Wand2, ChevronDown, ChevronUp } from "lucide-react";
+
+// ---------- palette ----------
+const INK = "#181B20";
+const INK_SOFT = "rgba(24,27,32,0.6)";
+const HAIRLINE = "rgba(24,27,32,0.18)";
+const PAPER = "#EAEDE4";
+const PAPER_RAISED = "#F3F5EE";
+const BRASS = "#93712A";
+const TEAL = "#33505A";
+const RUST = "#9A4A38";
+
+// ---------- amortization math ----------
+function standardPayment(balance, monthlyRate, n) {
+  if (n <= 0) return 0;
+  if (Math.abs(monthlyRate) < 1e-9) return balance / n;
+  const f = Math.pow(1 + monthlyRate, n);
+  return (balance * monthlyRate * f) / (f - 1);
+}
+
+// balance at the START of step index `uptoIndex` (0-based), simulating all prior steps
+function simulateUpTo(principal, steps, uptoIndex) {
+  let balance = principal;
+  for (let i = 0; i < uptoIndex; i++) {
+    const s = steps[i];
+    const r = (Number(s.rate) || 0) / 100 / 12;
+    const months = Math.max(1, Math.round(Number(s.months) || 1));
+    const payment = Number(s.payment) || 0;
+    for (let m = 0; m < months; m++) {
+      const interest = balance * r;
+      balance -= payment - interest;
+    }
+  }
+  return balance;
+}
+
+function simulateFull(principal, steps) {
+  let balance = principal;
+  const rows = [];
+  const stepSummaries = [];
+  let monthCounter = 0;
+
+  steps.forEach((s, stepIdx) => {
+    const r = (s.rate || 0) / 100 / 12;
+    const startBalance = balance;
+    let stepInterest = 0;
+    let stepPrincipal = 0;
+    for (let m = 0; m < s.months; m++) {
+      monthCounter += 1;
+      const beginBalance = balance;
+      const interest = beginBalance * r;
+      const principalPaid = s.payment - interest;
+      balance = beginBalance - principalPaid;
+      stepInterest += interest;
+      stepPrincipal += principalPaid;
+      rows.push({
+        month: monthCounter,
+        step: stepIdx + 1,
+        beginBalance,
+        interest,
+        payment: s.payment,
+        principal: principalPaid,
+        endBalance: balance,
+      });
+    }
+    stepSummaries.push({
+      step: stepIdx + 1,
+      months: s.months,
+      rate: s.rate,
+      payment: s.payment,
+      startBalance,
+      interest: stepInterest,
+      principal: stepPrincipal,
+      endBalance: balance,
+    });
+  });
+
+  const totalInterest = rows.reduce((a, r) => a + r.interest, 0);
+  const totalPayments = rows.reduce((a, r) => a + r.payment, 0);
+
+  return {
+    rows,
+    stepSummaries,
+    totalInterest,
+    totalPayments,
+    endingBalance: balance,
+    totalMonths: monthCounter,
+  };
+}
+
+// bisection solver for monthly IRR (cash flow sign pattern: one outflow then inflows)
+function solveMonthlyIRR(cashflows) {
+  const npv = (rate) =>
+    cashflows.reduce((acc, cf, i) => acc + cf / Math.pow(1 + rate, i), 0);
+
+  let lo = -0.99;
+  let hi = 3;
+  let npvLo = npv(lo);
+  let npvHi = npv(hi);
+
+  if (npvLo * npvHi > 0) {
+    hi = 20;
+    npvHi = npv(hi);
+    if (npvLo * npvHi > 0) return null;
+  }
+
+  let mid = 0;
+  for (let i = 0; i < 200; i++) {
+    mid = (lo + hi) / 2;
+    const npvMid = npv(mid);
+    if (Math.abs(npvMid) < 1e-8) break;
+    if (npvLo * npvMid < 0) {
+      hi = mid;
+    } else {
+      lo = mid;
+      npvLo = npvMid;
+    }
+  }
+  return mid;
+}
+
+// ---------- formatting ----------
+function fmtMoney(symbol, v) {
+  if (v === undefined || v === null || !isFinite(v)) return "—";
+  const neg = v < 0;
+  const s = Math.abs(v).toLocaleString("id-ID", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${neg ? "-" : ""}${symbol} ${s}`;
+}
+
+function fmtPct(v, d = 2) {
+  if (v === null || v === undefined || !isFinite(v)) return "—";
+  return `${v.toFixed(d)}%`;
+}
+
+// format a raw number as "1.234.567" (dot thousand separators, no decimals) for editable inputs
+function formatThousands(v) {
+  if (v === "" || v === null || v === undefined) return "";
+  const n = Number(v);
+  if (!isFinite(n)) return "";
+  return Math.round(n).toLocaleString("id-ID");
+}
+
+// strip dots/non-digits from a typed value back into a plain number
+function parseThousands(str) {
+  const digits = String(str).replace(/[^0-9]/g, "");
+  if (digits === "") return 0;
+  return Number(digits);
+}
+
+let idSeed = 1;
+function nextId() {
+  idSeed += 1;
+  return idSeed;
+}
+
+const DEFAULT_STEPS = [
+  { id: nextId(), months: 24, rate: 5, payment: 1200 },
+  { id: nextId(), months: 336, rate: 5, payment: 1650 },
+];
+
+export default function StepMortgageCalculator() {
+  const [symbol, setSymbol] = useState("Rp");
+  const [principal, setPrincipal] = useState(300000);
+  const [steps, setSteps] = useState(DEFAULT_STEPS);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [takeoverEnabled, setTakeoverEnabled] = useState(false);
+  const [oldRate, setOldRate] = useState(9);
+  const [oldTermMonths, setOldTermMonths] = useState(360);
+  const [customPlafon, setCustomPlafon] = useState(false);
+  const [oldPlafon, setOldPlafon] = useState(300000);
+  const [takeoverFee, setTakeoverFee] = useState(0);
+
+  const updateStep = (id, patch) => {
+    setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  };
+
+  const addStep = () => {
+    if (steps.length >= 7) return;
+    setSteps((prev) => [
+      ...prev,
+      { id: nextId(), months: 12, rate: prev.length ? prev[prev.length - 1].rate : 0, payment: 0 },
+    ]);
+  };
+
+  const removeStep = (id) => {
+    setSteps((prev) => (prev.length > 1 ? prev.filter((s) => s.id !== id) : prev));
+  };
+
+  const autoCalc = (index) => {
+    setSteps((prev) => {
+      const balanceAtStart = simulateUpTo(principal, prev, index);
+      const remainingMonths = prev
+        .slice(index)
+        .reduce((a, s) => a + Math.max(1, Math.round(Number(s.months) || 1)), 0);
+      const r = (Number(prev[index].rate) || 0) / 100 / 12;
+      const payment = standardPayment(balanceAtStart, r, remainingMonths);
+      return prev.map((s, i) =>
+        i === index ? { ...s, payment: Math.round(payment) } : s
+      );
+    });
+  };
+
+  const result = useMemo(() => {
+    if (!principal || principal <= 0) return null;
+    const cleanSteps = steps.map((s) => ({
+      months: Math.max(1, Math.round(Number(s.months) || 1)),
+      rate: Number(s.rate) || 0,
+      payment: Number(s.payment) || 0,
+    }));
+    const sim = simulateFull(principal, cleanSteps);
+
+    const cashflows = [-principal];
+    sim.rows.forEach((row, i) => {
+      const isLast = i === sim.rows.length - 1;
+      cashflows.push(row.payment + (isLast ? sim.endingBalance : 0));
+    });
+
+    const monthlyIRR = solveMonthlyIRR(cashflows);
+    const nominalAnnual = monthlyIRR !== null ? monthlyIRR * 12 * 100 : null;
+    const effectiveAnnual =
+      monthlyIRR !== null ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : null;
+
+    return { ...sim, monthlyIRR, nominalAnnual, effectiveAnnual };
+  }, [principal, steps]);
+
+  const chartData = useMemo(() => {
+    if (!result) return [];
+    const step = Math.max(1, Math.ceil(result.rows.length / 200));
+    const out = [];
+    result.rows.forEach((r, i) => {
+      if (i % step === 0 || i === result.rows.length - 1) {
+        out.push({ month: r.month, balance: Math.max(0, r.endBalance) });
+      }
+    });
+    return out;
+  }, [result]);
+
+  const stepBoundaries = useMemo(() => {
+    if (!result) return [];
+    const bounds = [];
+    let cum = 0;
+    result.stepSummaries.forEach((s, i) => {
+      cum += s.months;
+      if (i < result.stepSummaries.length - 1) bounds.push(cum);
+    });
+    return bounds;
+  }, [result]);
+
+  const hasBalloon = result && Math.abs(result.endingBalance) > 1;
+
+  // comparison: current step scheme vs. a single flat-rate "before takeover" scheme
+  const takeover = useMemo(() => {
+    if (!takeoverEnabled || !result || !principal || principal <= 0) return null;
+
+    const oldPrincipal = customPlafon ? Number(oldPlafon) || 0 : principal;
+    const oldMonthlyRate = (Number(oldRate) || 0) / 100 / 12;
+    const oldMonths = Math.max(1, Math.round(Number(oldTermMonths) || 1));
+    const oldPayment = standardPayment(oldPrincipal, oldMonthlyRate, oldMonths);
+    const fee = Number(takeoverFee) || 0;
+
+    const horizon = Math.max(oldMonths, result.totalMonths);
+    const cumOld = [0];
+    const cumNew = [fee];
+    let runningOld = 0;
+    let runningNew = fee;
+
+    for (let t = 1; t <= horizon; t++) {
+      if (t <= oldMonths) runningOld += oldPayment;
+      cumOld.push(runningOld);
+
+      if (t <= result.totalMonths) runningNew += result.rows[t - 1].payment;
+      cumNew.push(runningNew);
+    }
+
+    // find every point where the two cumulative lines meet (cross or touch),
+    // interpolating a fractional month for a precise position on the chart
+    const EPS = 1e-6;
+    const crossings = [];
+    for (let t = 1; t <= horizon; t++) {
+      const dPrev = cumNew[t - 1] - cumOld[t - 1];
+      const dCurr = cumNew[t] - cumOld[t];
+      if (Math.abs(dPrev) < EPS) {
+        crossings.push(t - 1);
+      } else if (dPrev * dCurr < 0) {
+        const frac = dPrev / (dPrev - dCurr);
+        crossings.push(t - 1 + frac);
+      }
+    }
+    if (Math.abs(cumNew[horizon] - cumOld[horizon]) < EPS) crossings.push(horizon);
+
+    // dedupe near-identical months (can happen at segment boundaries) and sort
+    crossings.sort((a, b) => a - b);
+    const meetMonths = crossings.filter(
+      (m, i) => i === 0 || Math.abs(m - crossings[i - 1]) > 1e-4
+    );
+
+    const firstMeetMonth = meetMonths.length ? meetMonths[0] : null;
+    const lastMeetMonth = meetMonths.length ? meetMonths[meetMonths.length - 1] : null;
+
+    const valueAt = (cum, month) => {
+      const t0 = Math.floor(month);
+      const t1 = Math.ceil(month);
+      const frac = month - t0;
+      return cum[t0] + (cum[t1] - cum[t0]) * frac;
+    };
+    const firstMeetValue = firstMeetMonth !== null ? valueAt(cumOld, firstMeetMonth) : null;
+    const lastMeetValue = lastMeetMonth !== null ? valueAt(cumOld, lastMeetMonth) : null;
+
+    let status;
+    if (meetMonths.length > 0) status = "crosses";
+    else if (cumNew[horizon] < cumOld[horizon]) status = "still-below";
+    else status = "always-above";
+
+    const oldTotal = cumOld[oldMonths];
+
+    return {
+      oldPrincipal,
+      oldPayment,
+      oldMonths,
+      fee,
+      horizon,
+      cumOld,
+      cumNew,
+      status,
+      firstMeetMonth,
+      firstMeetValue,
+      lastMeetMonth,
+      lastMeetValue,
+      oldTotal,
+      newTotalAtHorizon: cumNew[result.totalMonths],
+    };
+  }, [takeoverEnabled, oldRate, oldTermMonths, customPlafon, oldPlafon, takeoverFee, principal, result]);
+
+  const takeoverChartData = useMemo(() => {
+    if (!takeover) return [];
+    const step = Math.max(1, Math.ceil(takeover.horizon / 200));
+    const out = [];
+    for (let t = 0; t <= takeover.horizon; t++) {
+      if (t % step === 0 || t === takeover.horizon) {
+        out.push({ month: t, baru: takeover.cumNew[t], lama: takeover.cumOld[t] });
+      }
+    }
+    return out;
+  }, [takeover]);
+
+  const inputStyle = {
+    borderBottom: `1px solid ${HAIRLINE}`,
+    color: INK,
+  };
+
+  return (
+    <div style={{ background: PAPER, color: INK, minHeight: "100vh" }} className="font-mono">
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');`}</style>
+
+      <div className="max-w-6xl mx-auto px-6 py-10">
+        <header className="mb-10 max-w-xl">
+          <h1 style={{ fontFamily: "Fraunces, serif" }} className="text-4xl mb-3">
+            Buku Besar KPR Bertahap
+          </h1>
+          <p style={{ color: INK_SOFT }} className="text-sm leading-relaxed">
+            Simulasikan KPR yang dilunasi dalam hingga tujuh tahap pembayaran, lalu
+            hitung tingkat pengembalian internal (IRR) bagi pemberi pinjaman dari
+            arus kas yang dihasilkan.
+          </p>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-10">
+          {/* LEFT: inputs */}
+          <div className="lg:col-span-2 lg:pr-10" style={{ borderRight: `1px solid ${HAIRLINE}` }}>
+            <section className="mb-10">
+              <h2 className="text-xs mb-4" style={{ color: INK_SOFT }}>
+                Pinjaman
+              </h2>
+              <div className="space-y-5">
+                <div className="flex items-end gap-3">
+                  <div className="w-16">
+                    <label className="block text-xs mb-1" style={{ color: INK_SOFT }}>
+                      Simbol
+                    </label>
+                    <input
+                      value={symbol}
+                      onChange={(e) => setSymbol(e.target.value)}
+                      className="w-full bg-transparent py-1 text-sm focus:outline-none"
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs mb-1" style={{ color: INK_SOFT }}>
+                      Jumlah pinjaman
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={formatThousands(principal)}
+                      onChange={(e) => setPrincipal(parseThousands(e.target.value))}
+                      className="w-full bg-transparent py-1 text-lg focus:outline-none"
+                      style={inputStyle}
+                    />
+                  </div>
+                </div>
+                <div className="text-xs pt-1" style={{ color: INK_SOFT }}>
+                  Total jangka waktu: {result ? result.totalMonths : 0} bulan (
+                  {result ? (result.totalMonths / 12).toFixed(1) : "0"} tahun)
+                </div>
+              </div>
+            </section>
+
+            <section className="mb-10">
+              <label className="flex items-center gap-2 text-xs mb-4 cursor-pointer" style={{ color: INK_SOFT }}>
+                <input
+                  type="checkbox"
+                  checked={takeoverEnabled}
+                  onChange={(e) => setTakeoverEnabled(e.target.checked)}
+                />
+                Aktifkan simulasi take over (bandingkan dengan skema sebelumnya)
+              </label>
+
+              {takeoverEnabled && (
+                <div className="space-y-5">
+                  <div>
+                    <label className="block text-xs mb-1" style={{ color: INK_SOFT }}>
+                      Suku bunga skema lama (%) — sebelum take over
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={oldRate}
+                      onChange={(e) => setOldRate(parseFloat(e.target.value) || 0)}
+                      className="w-32 bg-transparent py-1 text-sm focus:outline-none"
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs mb-1" style={{ color: INK_SOFT }}>
+                      Sisa jangka waktu skema lama (bulan)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={oldTermMonths}
+                      onChange={(e) => setOldTermMonths(parseFloat(e.target.value) || 0)}
+                      className="w-32 bg-transparent py-1 text-sm focus:outline-none"
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: INK_SOFT }}>
+                    <input
+                      type="checkbox"
+                      checked={customPlafon}
+                      onChange={(e) => setCustomPlafon(e.target.checked)}
+                    />
+                    Plafon skema lama berbeda dari pinjaman baru
+                  </label>
+
+                  {customPlafon && (
+                    <div>
+                      <label className="block text-xs mb-1" style={{ color: INK_SOFT }}>
+                        Plafon skema lama
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={formatThousands(oldPlafon)}
+                        onChange={(e) => setOldPlafon(parseThousands(e.target.value))}
+                        className="w-full bg-transparent py-1 text-sm focus:outline-none"
+                        style={inputStyle}
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs mb-1" style={{ color: INK_SOFT }}>
+                      Biaya tambahan take over (bulan ke-0)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={formatThousands(takeoverFee)}
+                      onChange={(e) => setTakeoverFee(parseThousands(e.target.value))}
+                      className="w-full bg-transparent py-1 text-sm focus:outline-none"
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <div className="text-xs" style={{ color: INK_SOFT }}>
+                    Skema lama diasumsikan bunga tetap tunggal dengan cicilan tetap:{" "}
+                    {takeover ? fmtMoney(symbol, takeover.oldPayment) : "—"} / bulan
+                    {customPlafon ? " (dihitung dari plafon skema lama)." : " (menggunakan plafon yang sama dengan pinjaman baru)."}
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <section>
+              <div className="flex items-baseline justify-between mb-4">
+                <h2 className="text-xs" style={{ color: INK_SOFT }}>
+                  Tahap pembayaran
+                </h2>
+                <span className="text-xs" style={{ color: INK_SOFT }}>
+                  {steps.length}/7
+                </span>
+              </div>
+
+              <div className="grid grid-cols-12 gap-2 text-xs pb-2 mb-1" style={{ color: INK_SOFT, borderBottom: `1px solid ${HAIRLINE}` }}>
+                <div className="col-span-1">#</div>
+                <div className="col-span-3">Bulan</div>
+                <div className="col-span-3">Bunga %</div>
+                <div className="col-span-4">Cicilan</div>
+                <div className="col-span-1"></div>
+              </div>
+
+              {steps.map((s, idx) => (
+                <div
+                  key={s.id}
+                  className="grid grid-cols-12 gap-2 items-center py-2"
+                  style={{ borderBottom: `1px solid ${HAIRLINE}` }}
+                >
+                  <div
+                    className="col-span-1 text-sm"
+                    style={{ fontFamily: "Fraunces, serif", color: BRASS }}
+                  >
+                    {idx + 1}
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    value={s.months}
+                    onChange={(e) => updateStep(s.id, { months: e.target.value })}
+                    className="col-span-3 bg-transparent text-sm py-1 focus:outline-none"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={s.rate}
+                    onChange={(e) => updateStep(s.id, { rate: e.target.value })}
+                    className="col-span-3 bg-transparent text-sm py-1 focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={formatThousands(s.payment)}
+                    onChange={(e) => updateStep(s.id, { payment: parseThousands(e.target.value) })}
+                    className="col-span-4 bg-transparent text-sm py-1 focus:outline-none"
+                  />
+                  <div className="col-span-1 flex gap-1 justify-end">
+                    <button
+                      title="Hitung otomatis cicilan agar lunas sesuai sisa jangka waktu"
+                      onClick={() => autoCalc(idx)}
+                      className="p-1"
+                    >
+                      <Wand2 size={14} color={TEAL} />
+                    </button>
+                    <button
+                      title="Hapus tahap"
+                      onClick={() => removeStep(s.id)}
+                      disabled={steps.length === 1}
+                      className="p-1"
+                    >
+                      <Trash2 size={14} color={steps.length === 1 ? HAIRLINE : RUST} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              <button
+                onClick={addStep}
+                disabled={steps.length >= 7}
+                className="mt-4 text-xs flex items-center gap-1"
+                style={{ color: steps.length >= 7 ? INK_SOFT : TEAL }}
+              >
+                <Plus size={14} /> Tambah tahap
+              </button>
+            </section>
+          </div>
+
+          {/* RIGHT: results */}
+          <div className="lg:col-span-3">
+            <div className="mb-10">
+              {result && result.monthlyIRR !== null ? (
+                <>
+                  <div
+                    style={{ fontFamily: "Fraunces, serif", color: BRASS }}
+                    className="text-6xl leading-none"
+                  >
+                    {fmtPct(result.effectiveAnnual)}
+                  </div>
+                  <div className="text-sm mt-3" style={{ color: INK_SOFT }}>
+                    IRR efektif tahunan bagi pemberi pinjaman
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: INK_SOFT }}>
+                    {fmtPct(result.monthlyIRR * 100, 4)} per bulan · {fmtPct(result.nominalAnnual)} nominal tahunan
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm" style={{ color: INK_SOFT }}>
+                  Masukkan jumlah pinjaman dan minimal satu tahap pembayaran untuk menghitung IRR.
+                </div>
+              )}
+            </div>
+
+            <div
+              className="grid grid-cols-2 gap-y-3 gap-x-6 text-sm mb-3 pb-6"
+              style={{ borderBottom: `1px solid ${HAIRLINE}` }}
+            >
+              <div style={{ color: INK_SOFT }}>Total jangka waktu</div>
+              <div className="text-right">{result?.totalMonths ?? 0} bulan</div>
+              <div style={{ color: INK_SOFT }}>Total pembayaran</div>
+              <div className="text-right">{fmtMoney(symbol, result?.totalPayments ?? 0)}</div>
+              <div style={{ color: INK_SOFT }}>Total bunga</div>
+              <div className="text-right">{fmtMoney(symbol, result?.totalInterest ?? 0)}</div>
+              <div style={{ color: INK_SOFT }}>Sisa saldo akhir</div>
+              <div className="text-right" style={{ color: hasBalloon ? RUST : INK }}>
+                {fmtMoney(symbol, result?.endingBalance ?? 0)}
+              </div>
+            </div>
+            {hasBalloon && (
+              <div className="text-xs mb-8" style={{ color: RUST }}>
+                Sisa saldo yang tidak nol dianggap sebagai pelunasan yang diterima pada bulan terakhir saat menghitung IRR.
+              </div>
+            )}
+            {!hasBalloon && <div className="mb-8" />}
+
+            <div className="mb-10">
+              <h2 className="text-xs mb-4" style={{ color: INK_SOFT }}>
+                Saldo dari waktu ke waktu
+              </h2>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={chartData}>
+                  <CartesianGrid stroke={HAIRLINE} vertical={false} />
+                  <XAxis
+                    dataKey="month"
+                    type="number"
+                    domain={[0, "dataMax"]}
+                    tick={{ fontSize: 11, fill: INK_SOFT }}
+                    tickLine={false}
+                    axisLine={{ stroke: HAIRLINE }}
+                    label={{ value: "Bulan", position: "insideBottom", offset: -5, fontSize: 11, fill: INK_SOFT }}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: INK_SOFT }}
+                    tickLine={false}
+                    axisLine={{ stroke: HAIRLINE }}
+                    tickFormatter={(v) => symbol + " " + Math.round(v / 1000) + "rb"}
+                  />
+                  <Tooltip formatter={(v) => fmtMoney(symbol, v)} labelFormatter={(l) => `Bulan ${l}`} />
+                  {stepBoundaries.map((b, i) => (
+                    <ReferenceLine key={i} x={b} stroke={HAIRLINE} strokeDasharray="3 3" />
+                  ))}
+                  <Line type="monotone" dataKey="balance" stroke={TEAL} dot={false} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {takeover && (
+              <div className="mb-10">
+                <h2 className="text-xs mb-4" style={{ color: INK_SOFT }}>
+                  Total pembayaran kumulatif: skema baru vs skema lama
+                </h2>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={takeoverChartData}>
+                    <CartesianGrid stroke={HAIRLINE} vertical={false} />
+                    <XAxis
+                      dataKey="month"
+                      type="number"
+                      domain={[0, "dataMax"]}
+                      tick={{ fontSize: 11, fill: INK_SOFT }}
+                      tickLine={false}
+                      axisLine={{ stroke: HAIRLINE }}
+                      label={{ value: "Bulan", position: "insideBottom", offset: -5, fontSize: 11, fill: INK_SOFT }}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11, fill: INK_SOFT }}
+                      tickLine={false}
+                      axisLine={{ stroke: HAIRLINE }}
+                      tickFormatter={(v) => symbol + " " + Math.round(v / 1000) + "rb"}
+                    />
+                    <Tooltip formatter={(v) => fmtMoney(symbol, v)} labelFormatter={(l) => `Bulan ${l}`} />
+                    {takeover.firstMeetMonth !== null && (
+                      <ReferenceLine
+                        x={Math.round(takeover.firstMeetMonth)}
+                        stroke={RUST}
+                        strokeDasharray="3 3"
+                        label={{ value: "Titik temu pertama", fontSize: 11, fill: RUST, position: "top" }}
+                      />
+                    )}
+                    {takeover.lastMeetMonth !== null &&
+                      Math.abs(takeover.lastMeetMonth - takeover.firstMeetMonth) > 0.5 && (
+                        <ReferenceLine
+                          x={Math.round(takeover.lastMeetMonth)}
+                          stroke={TEAL}
+                          strokeDasharray="3 3"
+                          label={{ value: "Titik temu terakhir", fontSize: 11, fill: TEAL, position: "top" }}
+                        />
+                      )}
+                    <Line type="monotone" dataKey="baru" name="Skema baru" stroke={BRASS} dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="lama" name="Skema lama" stroke={TEAL} dot={false} strokeWidth={2} strokeDasharray="5 3" />
+                  </LineChart>
+                </ResponsiveContainer>
+
+                <div className="text-sm mt-4" style={{ color: INK_SOFT }}>
+                  {takeover.status === "crosses" && (
+                    <>
+                      Titik temu pertama sekitar bulan{" "}
+                      <span style={{ color: INK }}>{Math.round(takeover.firstMeetMonth)}</span>{" "}
+                      ({(takeover.firstMeetMonth / 12).toFixed(1)} tahun), saat total pembayaran kumulatif
+                      sekitar {fmtMoney(symbol, takeover.firstMeetValue)}.
+                      {Math.abs(takeover.lastMeetMonth - takeover.firstMeetMonth) > 0.5 && (
+                        <>
+                          {" "}Kedua skema bertemu lagi sekitar bulan{" "}
+                          <span style={{ color: INK }}>{Math.round(takeover.lastMeetMonth)}</span>{" "}
+                          ({(takeover.lastMeetMonth / 12).toFixed(1)} tahun), saat total pembayaran kumulatif
+                          sekitar {fmtMoney(symbol, takeover.lastMeetValue)}.
+                        </>
+                      )}
+                    </>
+                  )}
+                  {takeover.status === "still-below" && (
+                    <>
+                      Skema baru tetap lebih hemat secara kumulatif dibanding skema lama sepanjang{" "}
+                      {takeover.horizon} bulan yang disimulasikan — kedua garis belum pernah bertemu dalam jangka
+                      waktu ini.
+                    </>
+                  )}
+                  {takeover.status === "always-above" && (
+                    <>
+                      Total pembayaran skema baru sudah lebih tinggi dari skema lama sejak awal dan tidak
+                      pernah bertemu — skema lama secara kumulatif selalu lebih hemat.
+                    </>
+                  )}
+                </div>
+
+                <div
+                  className="grid grid-cols-2 gap-y-2 gap-x-6 text-sm mt-5 pt-5"
+                  style={{ borderTop: `1px solid ${HAIRLINE}` }}
+                >
+                  {customPlafon && (
+                    <>
+                      <div style={{ color: INK_SOFT }}>Plafon skema lama</div>
+                      <div className="text-right">{fmtMoney(symbol, takeover.oldPrincipal)}</div>
+                    </>
+                  )}
+                  <div style={{ color: INK_SOFT }}>Total skema lama ({takeover.oldMonths} bulan)</div>
+                  <div className="text-right">{fmtMoney(symbol, takeover.oldTotal)}</div>
+                  {takeover.fee > 0 && (
+                    <>
+                      <div style={{ color: INK_SOFT }}>Biaya tambahan take over (bulan ke-0)</div>
+                      <div className="text-right">{fmtMoney(symbol, takeover.fee)}</div>
+                    </>
+                  )}
+                  <div style={{ color: INK_SOFT }}>Total skema baru ({result.totalMonths} bulan)</div>
+                  <div className="text-right">{fmtMoney(symbol, takeover.newTotalAtHorizon)}</div>
+                </div>
+              </div>
+            )}
+
+            <div className="mb-8">
+              <h2 className="text-xs mb-4" style={{ color: INK_SOFT }}>
+                Ringkasan tahap
+              </h2>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${HAIRLINE}` }} className="text-left">
+                    <th className="py-2 font-normal">Tahap</th>
+                    <th className="py-2 font-normal">Bulan</th>
+                    <th className="py-2 font-normal">Bunga</th>
+                    <th className="py-2 font-normal">Cicilan</th>
+                    <th className="py-2 font-normal text-right">Bunga terbayar</th>
+                    <th className="py-2 font-normal text-right">Pokok terbayar</th>
+                    <th className="py-2 font-normal text-right">Saldo akhir</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result?.stepSummaries.map((s) => (
+                    <tr key={s.step} style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
+                      <td className="py-2" style={{ fontFamily: "Fraunces, serif", color: BRASS }}>
+                        {s.step}
+                      </td>
+                      <td className="py-2">{s.months}</td>
+                      <td className="py-2">{fmtPct(s.rate)}</td>
+                      <td className="py-2">{fmtMoney(symbol, s.payment)}</td>
+                      <td className="py-2 text-right">{fmtMoney(symbol, s.interest)}</td>
+                      <td className="py-2 text-right">{fmtMoney(symbol, s.principal)}</td>
+                      <td className="py-2 text-right">{fmtMoney(symbol, s.endBalance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div>
+              <button
+                onClick={() => setShowSchedule((v) => !v)}
+                className="text-xs flex items-center gap-1"
+                style={{ color: TEAL }}
+              >
+                {showSchedule ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {showSchedule ? "Sembunyikan" : "Tampilkan"} jadwal bulanan
+              </button>
+              {showSchedule && (
+                <div className="mt-4 max-h-80 overflow-y-auto" style={{ border: `1px solid ${HAIRLINE}` }}>
+                  <table className="w-full text-xs">
+                    <thead style={{ position: "sticky", top: 0, background: PAPER_RAISED }}>
+                      <tr style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
+                        <th className="py-1 px-2 text-left font-normal">Bln</th>
+                        <th className="py-1 px-2 text-left font-normal">Awal</th>
+                        <th className="py-1 px-2 text-left font-normal">Bunga</th>
+                        <th className="py-1 px-2 text-left font-normal">Cicilan</th>
+                        <th className="py-1 px-2 text-left font-normal">Pokok</th>
+                        <th className="py-1 px-2 text-left font-normal">Akhir</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result?.rows.map((r) => (
+                        <tr key={r.month} style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
+                          <td className="py-1 px-2">{r.month}</td>
+                          <td className="py-1 px-2">{fmtMoney(symbol, r.beginBalance)}</td>
+                          <td className="py-1 px-2">{fmtMoney(symbol, r.interest)}</td>
+                          <td className="py-1 px-2">{fmtMoney(symbol, r.payment)}</td>
+                          <td className="py-1 px-2">{fmtMoney(symbol, r.principal)}</td>
+                          <td className="py-1 px-2">{fmtMoney(symbol, r.endBalance)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
