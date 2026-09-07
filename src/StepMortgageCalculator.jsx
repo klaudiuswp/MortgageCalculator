@@ -855,9 +855,10 @@ export default function StepMortgageCalculator() {
               <h2 className="text-xs mb-4" style={{ color: INK_SOFT }}>
                 Ringkasan tahap
               </h2>
-              <table className="max-w-fit text-sm divide-y">
+              <table className="max-w-fit text-xs border-collapse">
                 <thead>
-                  <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${HAIRLINE}` }} className="text-left">
+                  {/* <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${HAIRLINE}` }} className="text-left border-b"> */}
+                  <tr className="text-left border-b" style={{ color: INK_SOFT, borderColor: HAIRLINE }}>
                     <th className="py-2 px-2 font-normal">Tahap</th>
                     <th className="py-2 px-2 font-normal">Bulan</th>
                     <th className="py-2 px-2 font-normal">Bunga</th>
@@ -867,9 +868,10 @@ export default function StepMortgageCalculator() {
                     <th className="py-2 px-2 font-normal text-right">Saldo akhir</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y">
+                <tbody className="divide-y" style={{ "--tw-divide-opacity": 1 }}>
                   {result?.stepSummaries.map((s) => (
-                    <tr key={s.step} style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
+                    // <tr key={s.step} style={{ borderColor: `1px solid ${HAIRLINE}` }}>
+                    <tr key={s.step} style={{ borderColor: HAIRLINE }}>
                       <td className="py-2 px-2 text-center" style={{ fontFamily: "Fraunces, serif", color: BRASS }}>
                         {s.step}
                       </td>
