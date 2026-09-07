@@ -462,7 +462,7 @@ export default function StepMortgageCalculator() {
             Consumer Loan Group (CSL)
             </h4>
           <p style={{ color: INK_SOFT }} className="text-sm leading-relaxed">
-            Simulasi Kredit KPR dengan program disesuaikan · Made with ❤️ Ditra
+            Simulasi Kredit KPR dengan program disesuaikan · Made with ❤️ Claude
           </p>
         </header>
 
