@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useLayoutEffect } from "react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -145,6 +145,61 @@ function parseThousands(str) {
   return Number(digits);
 }
 
+// Thousands-formatted numeric input that keeps the cursor where you typed,
+// even in the middle or at the start — a plain formatThousands()/onChange()
+// pair re-renders the dotted string on every keystroke and the browser
+// resets the caret to the end, making it impossible to edit anywhere but
+// the tail. This tracks how many DIGITS (ignoring separator dots) sit
+// before the caret, reformats, then restores the caret after that many
+// digits in the new string.
+function ThousandsInput({ value, onChange, className, style, ...rest }) {
+  const ref = useRef(null);
+  const pendingCursor = useRef(null);
+
+  useLayoutEffect(() => {
+    if (pendingCursor.current !== null && ref.current) {
+      ref.current.setSelectionRange(pendingCursor.current, pendingCursor.current);
+      pendingCursor.current = null;
+    }
+  });
+
+  const handleChange = (e) => {
+    const raw = e.target.value;
+    const cursorPos = e.target.selectionStart ?? raw.length;
+    const digitsBeforeCursor = raw.slice(0, cursorPos).replace(/[^0-9]/g, "").length;
+
+    const numeric = parseThousands(raw);
+    const formatted = formatThousands(numeric);
+
+    let seen = 0;
+    let newPos = formatted.length;
+    for (let i = 0; i < formatted.length; i++) {
+      if (/[0-9]/.test(formatted[i])) seen++;
+      if (seen === digitsBeforeCursor) {
+        newPos = i + 1;
+        break;
+      }
+    }
+    if (digitsBeforeCursor === 0) newPos = 0;
+
+    pendingCursor.current = newPos;
+    onChange(numeric);
+  };
+
+  return (
+    <input
+      ref={ref}
+      type="text"
+      inputMode="numeric"
+      value={formatThousands(value)}
+      onChange={handleChange}
+      className={className}
+      style={style}
+      {...rest}
+    />
+  );
+}
+
 let idSeed = 1;
 function nextId() {
   idSeed += 1;
@@ -152,13 +207,14 @@ function nextId() {
 }
 
 const DEFAULT_STEPS = [
-  { id: nextId(), months: 24, rate: 5, payment: 1200 },
-  { id: nextId(), months: 336, rate: 5, payment: 1650 },
+  { id: nextId(), months: 36, rate: 3, payment: 6905816 },
+  { id: nextId(), months: 36, rate: 6.5, payment: 8358534 },
+  { id: nextId(), months: 108, rate: 9.35, payment: 9364331 },
 ];
 
 export default function StepMortgageCalculator() {
   const [symbol, setSymbol] = useState("Rp");
-  const [principal, setPrincipal] = useState(300000);
+  const [principal, setPrincipal] = useState(1000000000);
   const [steps, setSteps] = useState(DEFAULT_STEPS);
   const [showSchedule, setShowSchedule] = useState(false);
   const [takeoverEnabled, setTakeoverEnabled] = useState(false);
@@ -234,7 +290,27 @@ export default function StepMortgageCalculator() {
     const effectiveAnnual =
       monthlyIRR !== null ? (Math.pow(1 + monthlyIRR, 12) - 1) * 100 : null;
 
-    return { ...sim, monthlyIRR, nominalAnnual, effectiveAnnual };
+    // Alternative annual IRR: sum each calendar year's cash flow into one lump
+    // (as if it landed on a single date instead of monthly), then solve IRR
+    // directly on those yearly buckets. This is what you get from "=IRR(...)"
+    // over a 15-row yearly cash-flow table in Excel — it does NOT match the
+    // monthly-then-annualized figures above, because bunching intra-year
+    // payments into one year-end value changes the implied timing of money.
+    const yearlyCashflows = [-principal];
+    for (let y = 0; y < Math.ceil(sim.rows.length / 12); y++) {
+      const chunk = cashflows.slice(1 + y * 12, 1 + y * 12 + 12);
+      yearlyCashflows.push(chunk.reduce((a, b) => a + b, 0));
+    }
+    const yearlyIRR = yearlyCashflows.length > 1 ? solveMonthlyIRR(yearlyCashflows) : null;
+    const annualIRRFromYearlyBuckets = yearlyIRR !== null ? yearlyIRR * 100 : null;
+
+    return {
+      ...sim,
+      monthlyIRR,
+      nominalAnnual,
+      effectiveAnnual,
+      annualIRRFromYearlyBuckets,
+    };
   }, [principal, steps]);
 
   const chartData = useMemo(() => {
@@ -363,8 +439,19 @@ export default function StepMortgageCalculator() {
   };
 
   return (
-    <div style={{ background: PAPER, color: INK, minHeight: "100vh" }} className="font-mono">
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');`}</style>
+    <div style={{ background: PAPER, color: INK, minHeight: "100vh" }} className="font-mono step-mortgage-calc">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+        .step-mortgage-calc input[type="number"]::-webkit-outer-spin-button,
+        .step-mortgage-calc input[type="number"]::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        .step-mortgage-calc input[type="number"] {
+          -moz-appearance: textfield;
+          appearance: textfield;
+        }
+      `}</style>
 
       <div className="max-w-fit mx-auto px-6 py-10">
         <header className="mb-10 max-w-xl">
@@ -402,11 +489,9 @@ export default function StepMortgageCalculator() {
                     <label className="block text-xs mb-1" style={{ color: INK_SOFT }}>
                       Jumlah pinjaman
                     </label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={formatThousands(principal)}
-                      onChange={(e) => setPrincipal(parseThousands(e.target.value))}
+                    <ThousandsInput
+                      value={principal}
+                      onChange={setPrincipal}
                       className="w-full bg-transparent py-1 text-lg focus:outline-none"
                       style={inputStyle}
                     />
@@ -472,11 +557,9 @@ export default function StepMortgageCalculator() {
                       <label className="block text-xs mb-1" style={{ color: INK_SOFT }}>
                         Plafon skema lama
                       </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={formatThousands(oldPlafon)}
-                        onChange={(e) => setOldPlafon(parseThousands(e.target.value))}
+                      <ThousandsInput
+                        value={oldPlafon}
+                        onChange={setOldPlafon}
                         className="w-full bg-transparent py-1 text-sm focus:outline-none"
                         style={inputStyle}
                       />
@@ -487,11 +570,9 @@ export default function StepMortgageCalculator() {
                     <label className="block text-xs mb-1" style={{ color: INK_SOFT }}>
                       Biaya tambahan take over (bulan ke-0)
                     </label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={formatThousands(takeoverFee)}
-                      onChange={(e) => setTakeoverFee(parseThousands(e.target.value))}
+                    <ThousandsInput
+                      value={takeoverFee}
+                      onChange={setTakeoverFee}
                       className="w-full bg-transparent py-1 text-sm focus:outline-none"
                       style={inputStyle}
                     />
@@ -550,11 +631,9 @@ export default function StepMortgageCalculator() {
                     onChange={(e) => updateStep(s.id, { rate: e.target.value })}
                     className="col-span-3 bg-transparent text-sm py-1 focus:outline-none"
                   />
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={formatThousands(s.payment)}
-                    onChange={(e) => updateStep(s.id, { payment: parseThousands(e.target.value) })}
+                  <ThousandsInput
+                    value={s.payment}
+                    onChange={(v) => updateStep(s.id, { payment: v })}
                     className="col-span-4 bg-transparent text-sm py-1 focus:outline-none"
                   />
                   <div className="col-span-1 flex gap-1 justify-end">
@@ -608,6 +687,13 @@ export default function StepMortgageCalculator() {
                   <div className="text-xs mt-1" style={{ color: INK_SOFT }}>
                     {fmtPct(result.monthlyIRR * 100, 4)} per bulan · {fmtPct(result.nominalAnnual)} nominal tahunan
                   </div>
+                  {result.annualIRRFromYearlyBuckets !== null && (
+                    <div className="text-xs mt-1" style={{ color: INK_SOFT }}>
+                      {fmtPct(result.annualIRRFromYearlyBuckets)} bila arus kas dijumlah per tahun lalu IRR
+                      dihitung langsung per tahun (cara umum dipakai di Excel — angsuran 12 bulan
+                      digabung jadi satu nilai per tahun, bukan dihitung bulanan lalu disetahunkan)
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="text-sm" style={{ color: INK_SOFT }}>
