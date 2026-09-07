@@ -221,7 +221,7 @@ export default function StepMortgageCalculator() {
   const [oldRate, setOldRate] = useState(9);
   const [oldTermMonths, setOldTermMonths] = useState(100);
   const [customPlafon, setCustomPlafon] = useState(false);
-  const [oldPlafon, setOldPlafon] = useState(300000);
+  const [oldPlafon, setOldPlafon] = useState(800000000);
   const [takeoverFee, setTakeoverFee] = useState(50000000);
 
   const updateStep = (id, patch) => {
