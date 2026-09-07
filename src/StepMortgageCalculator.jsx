@@ -9,7 +9,7 @@ import {
   Tooltip,
   ReferenceLine,
 } from "recharts";
-import { Plus, Trash2, Wand2, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 
 // ---------- palette ----------
 const INK = "#181B20";
@@ -27,22 +27,6 @@ function standardPayment(balance, monthlyRate, n) {
   if (Math.abs(monthlyRate) < 1e-9) return balance / n;
   const f = Math.pow(1 + monthlyRate, n);
   return (balance * monthlyRate * f) / (f - 1);
-}
-
-// balance at the START of step index `uptoIndex` (0-based), simulating all prior steps
-function simulateUpTo(principal, steps, uptoIndex) {
-  let balance = principal;
-  for (let i = 0; i < uptoIndex; i++) {
-    const s = steps[i];
-    const r = (Number(s.rate) || 0) / 100 / 12;
-    const months = Math.max(1, Math.round(Number(s.months) || 1));
-    const payment = Number(s.payment) || 0;
-    for (let m = 0; m < months; m++) {
-      const interest = balance * r;
-      balance -= payment - interest;
-    }
-  }
-  return balance;
 }
 
 function simulateFull(principal, steps) {
@@ -200,17 +184,33 @@ export default function StepMortgageCalculator() {
     setSteps((prev) => (prev.length > 1 ? prev.filter((s) => s.id !== id) : prev));
   };
 
-  const autoCalc = (index) => {
+  // Recompute every step's payment in one top-down pass. For each step, the
+  // payment is the standard annuity payment that would fully amortize the
+  // CURRENT running balance if this step's rate held for the remaining total
+  // term (an ARM-style recast). The balance is then carried forward through
+  // that step's own months using the payment just computed, so step N+1
+  // always starts from a value derived from freshly-solved numbers rather
+  // than from whatever was previously typed into step N — this is what the
+  // old per-step button couldn't guarantee, since it read each other step's
+  // payment as-is regardless of whether it had been (re)calculated yet.
+  const recalcAllPayments = () => {
     setSteps((prev) => {
-      const balanceAtStart = simulateUpTo(principal, prev, index);
-      const remainingMonths = prev
-        .slice(index)
-        .reduce((a, s) => a + Math.max(1, Math.round(Number(s.months) || 1)), 0);
-      const r = (Number(prev[index].rate) || 0) / 100 / 12;
-      const payment = standardPayment(balanceAtStart, r, remainingMonths);
-      return prev.map((s, i) =>
-        i === index ? { ...s, payment: Math.round(payment) } : s
-      );
+      let balance = principal;
+      const next = [];
+      for (let i = 0; i < prev.length; i++) {
+        const monthsOwn = Math.max(1, Math.round(Number(prev[i].months) || 1));
+        const remainingMonths = prev
+          .slice(i)
+          .reduce((a, s) => a + Math.max(1, Math.round(Number(s.months) || 1)), 0);
+        const r = (Number(prev[i].rate) || 0) / 100 / 12;
+        const payment = Math.round(standardPayment(balance, r, remainingMonths));
+        next.push({ ...prev[i], payment });
+        for (let m = 0; m < monthsOwn; m++) {
+          const interest = balance * r;
+          balance -= payment - interest;
+        }
+      }
+      return next;
     });
   };
 
@@ -559,13 +559,6 @@ export default function StepMortgageCalculator() {
                   />
                   <div className="col-span-1 flex gap-1 justify-end">
                     <button
-                      title="Hitung otomatis cicilan agar lunas sesuai sisa jangka waktu"
-                      onClick={() => autoCalc(idx)}
-                      className="p-1"
-                    >
-                      <Wand2 size={14} color={TEAL} />
-                    </button>
-                    <button
                       title="Hapus tahap"
                       onClick={() => removeStep(s.id)}
                       disabled={steps.length === 1}
@@ -577,14 +570,24 @@ export default function StepMortgageCalculator() {
                 </div>
               ))}
 
-              <button
-                onClick={addStep}
-                disabled={steps.length >= 7}
-                className="mt-4 text-xs flex items-center gap-1"
-                style={{ color: steps.length >= 7 ? INK_SOFT : TEAL }}
-              >
-                <Plus size={14} /> Tambah tahap
-              </button>
+              <div className="mt-4 flex items-center gap-4">
+                <button
+                  onClick={addStep}
+                  disabled={steps.length >= 7}
+                  className="text-xs flex items-center gap-1"
+                  style={{ color: steps.length >= 7 ? INK_SOFT : TEAL }}
+                >
+                  <Plus size={14} /> Tambah tahap
+                </button>
+                <button
+                  title="Hitung ulang cicilan semua tahap dari awal, berurutan"
+                  onClick={recalcAllPayments}
+                  className="text-xs flex items-center gap-1"
+                  style={{ color: BRASS }}
+                >
+                  <RefreshCw size={14} /> Hitung ulang semua cicilan
+                </button>
+              </div>
             </section>
           </div>
 
