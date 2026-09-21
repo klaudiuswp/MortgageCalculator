@@ -879,6 +879,7 @@ export default function StepMortgageCalculator() {
               <h2 className="text-xs mb-4" style={{ color: INK_SOFT }}>
                 Ringkasan tahap
               </h2>
+              <div className="mt-4 max-h-80 overflow-y-auto" style={{ border: `1px solid ${HAIRLINE}` }}>
               <table className="w-full text-xs border-collapse">
                 <thead style={{ position: "sticky", top: 0, background: PAPER_RAISED }}>
                   {/* <tr style={{ color: INK_SOFT, borderBottom: `1px solid ${HAIRLINE}` }} className="text-left border-b"> */}
@@ -909,6 +910,7 @@ export default function StepMortgageCalculator() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
 
             <div>
