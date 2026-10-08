@@ -125,6 +125,16 @@ function fmtMoney(symbol, v) {
   return `${neg ? "-" : ""}${symbol} ${s}`;
 }
 
+function fmtCompact(symbol, v) {
+  const a = Math.abs(v);
+  let n = v, u = "";
+  if (a >= 1e12) { n = v / 1e12; u = " T"; }
+  else if (a >= 1e9) { n = v / 1e9; u = " M"; }
+  else if (a >= 1e6) { n = v / 1e6; u = " jt"; }
+  else if (a >= 1e3) { n = v / 1e3; u = " rb"; }
+  return `${symbol}\u00a0${n.toLocaleString("id-ID", { maximumFractionDigits: 2 })}${u.replace(" ", "\u00a0")}`;
+}
+
 function fmtPct(v, d = 2) {
   if (v === null || v === undefined || !isFinite(v)) return "—";
   return `${v.toFixed(d)}%`;
@@ -453,9 +463,12 @@ export default function StepMortgageCalculator() {
   };
 
   return (
-    <div style={{ background: PAPER, color: INK, minHeight: "100vh" }} className="font-mono step-mortgage-calc">
+    <div style={{ background: PAPER, color: INK }} className="font-mono step-mortgage-calc">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+        .step-mortgage-calc.font-mono {
+          font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
         .step-mortgage-calc input[type="number"]::-webkit-outer-spin-button,
         .step-mortgage-calc input[type="number"]::-webkit-inner-spin-button {
           -webkit-appearance: none;
@@ -465,14 +478,64 @@ export default function StepMortgageCalculator() {
           -moz-appearance: textfield;
           appearance: textfield;
         }
+
+        .calc-wrap {
+          width: 100%;
+          max-width: 1440px;
+          padding-left: max(16px, env(safe-area-inset-left, 0px));
+          padding-right: max(16px, env(safe-area-inset-right, 0px));
+        }
+        @media (min-width: 640px) {
+          .calc-wrap {
+            padding-left: max(24px, env(safe-area-inset-left, 0px));
+            padding-right: max(24px, env(safe-area-inset-right, 0px));
+          }
+        }
+        .step-mortgage-calc h1, .step-mortgage-calc h4 { text-wrap: balance; }
+
+        /* inputs column: side rule on desktop, bottom rule when stacked */
+        @media (min-width: 1024px) { .calc-inputs { border-right: 1px solid rgba(24,27,32,0.18); } }
+        @media (max-width: 1023px) { .calc-inputs { border-bottom: 1px solid rgba(24,27,32,0.18); padding-bottom: 2rem; } }
+
+        /* step rows: #, months, rate, payment, delete */
+        .step-grid {
+          display: grid;
+          grid-template-columns: 1.25rem minmax(0, 2fr) minmax(0, 2fr) minmax(0, 4fr) 2.25rem;
+          column-gap: 0.5rem;
+        }
+
+        /* label / value lists */
+        .kv { grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; }
+        .kv > .text-right { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .kv > .text-right > div { white-space: normal; contain: inline-size; }
+        @media (max-width: 379px) {
+          .kv { grid-template-columns: minmax(0, 1fr); row-gap: 0.125rem; }
+          .kv > .text-right { text-align: left; margin-bottom: 0.625rem; }
+        }
+
+        /* tables scroll sideways inside their own box instead of wrapping figures */
+        .step-mortgage-calc table { font-variant-numeric: tabular-nums; }
+        .step-mortgage-calc th, .step-mortgage-calc td { white-space: nowrap; }
+        .step-mortgage-calc .overflow-y-auto { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+        /* touch screens: bigger tap targets, 16px inputs so iOS doesn't zoom on focus */
+        @media (pointer: coarse) {
+          .calc-btn { padding-block: 10px; }
+          .calc-icon-btn { padding: 8px; }
+          .step-mortgage-calc input.text-sm, .step-mortgage-calc input.text-xs { font-size: 16px; }
+          .step-mortgage-calc input[type="checkbox"] { width: 18px; height: 18px; }
+        }
+
+        .step-mortgage-calc button:focus-visible,
+        .step-mortgage-calc input[type="checkbox"]:focus-visible { outline: 2px solid #93712A; outline-offset: 2px; }
       `}</style>
 
-      <div className="max-w-fit mx-auto px-6 py-10">
-        <header className="mb-10 max-w-xl">
-          <h1 style={{ fontFamily: "Fraunces, serif" }} className="text-4xl mb-3">
+      <div className="calc-wrap mx-auto py-8 sm:py-10">
+        <header className="mb-8 sm:mb-10 max-w-xl">
+          <h1 style={{ fontFamily: "Fraunces, serif" }} className="text-3xl sm:text-4xl mb-2 sm:mb-3">
             Kalkulator KPR
           </h1>
-          <h4 style={{ fontFamily: "Fraunces, serif" }} className="text-4xl mb-3">
+          <h4 style={{ fontFamily: "Fraunces, serif" }} className="text-3xl sm:text-4xl mb-2 sm:mb-3">
             Consumer Loan Group (CSL)
           </h4>
           <p style={{ color: INK_SOFT }} className="text-sm leading-relaxed">
@@ -480,9 +543,9 @@ export default function StepMortgageCalculator() {
           </p>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-10">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 lg:gap-10">
           {/* LEFT: inputs */}
-          <div className="lg:col-span-2 lg:pr-10" style={{ borderRight: `1px solid ${HAIRLINE}` }}>
+          <div className="lg:col-span-2 lg:pr-10 calc-inputs min-w-0">
             <section className="mb-10">
               <h2 className="text-xs mb-4" style={{ color: INK_SOFT }}>
                 Pinjaman
@@ -612,22 +675,22 @@ export default function StepMortgageCalculator() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-12 gap-2 text-xs pb-2 mb-1" style={{ color: INK_SOFT, borderBottom: `1px solid ${HAIRLINE}` }}>
-                <div className="col-span-1">#</div>
-                <div className="col-span-3">Bulan</div>
-                <div className="col-span-3">Bunga %</div>
-                <div className="col-span-4">Cicilan</div>
-                <div className="col-span-1"></div>
+              <div className="step-grid text-xs pb-2 mb-1" style={{ color: INK_SOFT, borderBottom: `1px solid ${HAIRLINE}` }}>
+                <div className="">#</div>
+                <div className="">Bulan</div>
+                <div className="">Bunga %</div>
+                <div className="">Cicilan</div>
+                <div className=""></div>
               </div>
 
               {steps.map((s, idx) => (
                 <div
                   key={s.id}
-                  className="grid grid-cols-12 gap-2 items-center py-2"
+                  className="step-grid items-center py-2"
                   style={{ borderBottom: `1px solid ${HAIRLINE}` }}
                 >
                   <div
-                    className="col-span-1 text-sm"
+                    className="text-sm"
                     style={{ fontFamily: "Fraunces, serif", color: BRASS }}
                   >
                     {idx + 1}
@@ -637,26 +700,26 @@ export default function StepMortgageCalculator() {
                     min="1"
                     value={s.months}
                     onChange={(e) => updateStep(s.id, { months: e.target.value })}
-                    className="col-span-3 bg-transparent text-sm py-1 focus:outline-none"
+                    className="w-full min-w-0 bg-transparent text-sm py-1 focus:outline-none"
                   />
                   <input
                     type="number"
                     step="0.01"
                     value={s.rate}
                     onChange={(e) => updateStep(s.id, { rate: e.target.value })}
-                    className="col-span-3 bg-transparent text-sm py-1 focus:outline-none"
+                    className="w-full min-w-0 bg-transparent text-sm py-1 focus:outline-none"
                   />
                   <ThousandsInput
                     value={s.payment}
                     onChange={(v) => updateStep(s.id, { payment: v })}
-                    className="col-span-4 bg-transparent text-sm py-1 focus:outline-none"
+                    className="w-full min-w-0 bg-transparent text-sm py-1 focus:outline-none"
                   />
-                  <div className="col-span-1 flex gap-1 justify-end">
+                  <div className="flex gap-1 justify-end">
                     <button
                       title="Hapus tahap"
                       onClick={() => removeStep(s.id)}
                       disabled={steps.length === 1}
-                      className="p-1"
+                      className="p-1 calc-icon-btn"
                     >
                       <Trash2 size={14} color={steps.length === 1 ? HAIRLINE : RUST} />
                     </button>
@@ -664,11 +727,11 @@ export default function StepMortgageCalculator() {
                 </div>
               ))}
 
-              <div className="mt-4 flex items-center gap-4">
+              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1">
                 <button
                   onClick={addStep}
                   disabled={steps.length >= 7}
-                  className="text-xs flex items-center gap-1"
+                  className="text-xs flex items-center gap-1 calc-btn"
                   style={{ color: steps.length >= 7 ? INK_SOFT : TEAL }}
                 >
                   <Plus size={14} /> Tambah tahap
@@ -676,7 +739,7 @@ export default function StepMortgageCalculator() {
                 <button
                   title="Hitung ulang cicilan semua tahap dari awal, berurutan"
                   onClick={recalcAllPayments}
-                  className="text-xs flex items-center gap-1"
+                  className="text-xs flex items-center gap-1 calc-btn"
                   style={{ color: BRASS }}
                 >
                   <RefreshCw size={14} /> Hitung ulang semua cicilan
@@ -686,13 +749,13 @@ export default function StepMortgageCalculator() {
           </div>
 
           {/* RIGHT: results */}
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 min-w-0">
             <div className="mb-10">
               {result && result.monthlyIRR !== null ? (
                 <>
                   <div
                     style={{ fontFamily: "Fraunces, serif", color: BRASS }}
-                    className="text-6xl leading-none"
+                    className="text-5xl sm:text-6xl leading-none"
                   >
                     {fmtPct(result.annualIRRFromYearlyBuckets)}
                   </div>
@@ -711,7 +774,7 @@ export default function StepMortgageCalculator() {
             </div>
 
             <div
-              className="grid grid-cols-2 gap-y-3 gap-x-6 text-sm mb-3 pb-6"
+              className="grid kv gap-y-3 text-sm mb-3 pb-6"
               style={{ borderBottom: `1px solid ${HAIRLINE}` }}
             >
               <div style={{ color: INK_SOFT }}>Total jangka waktu</div>
@@ -737,7 +800,7 @@ export default function StepMortgageCalculator() {
                 Saldo dari waktu ke waktu
               </h2>
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={chartData}>
+                <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
                   <CartesianGrid stroke={HAIRLINE} vertical={false} />
                   <XAxis
                     dataKey="month"
@@ -752,7 +815,8 @@ export default function StepMortgageCalculator() {
                     tick={{ fontSize: 11, fill: INK_SOFT }}
                     tickLine={false}
                     axisLine={{ stroke: HAIRLINE }}
-                    tickFormatter={(v) => symbol + " " + Math.round(v / 1000) + "rb"}
+                    width={78}
+                    tickFormatter={(v) => fmtCompact(symbol, v)}
                   />
                   <Tooltip formatter={(v) => fmtMoney(symbol, v)} labelFormatter={(l) => `Bulan ${l}`} />
                   {stepBoundaries.map((b, i) => (
@@ -772,7 +836,7 @@ export default function StepMortgageCalculator() {
                   Kumulatif cicilan penuh (pokok + bunga) yang telah dibayarkan, bukan pokok saja.
                 </p>
                 <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={takeoverChartData}>
+                  <LineChart data={takeoverChartData} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
                     <CartesianGrid stroke={HAIRLINE} vertical={false} />
                     <XAxis
                       dataKey="month"
@@ -787,7 +851,8 @@ export default function StepMortgageCalculator() {
                       tick={{ fontSize: 11, fill: INK_SOFT }}
                       tickLine={false}
                       axisLine={{ stroke: HAIRLINE }}
-                      tickFormatter={(v) => symbol + " " + Math.round(v / 1000) + "rb"}
+                      width={78}
+                    tickFormatter={(v) => fmtCompact(symbol, v)}
                     />
                     <Tooltip formatter={(v) => fmtMoney(symbol, v)} labelFormatter={(l) => `Bulan ${l}`} />
                     {takeover.firstMeetMonth !== null && (
@@ -795,7 +860,7 @@ export default function StepMortgageCalculator() {
                         x={Math.round(takeover.firstMeetMonth)}
                         stroke={RUST}
                         strokeDasharray="3 3"
-                        label={{ value: "Titik temu pertama", fontSize: 11, fill: RUST, position: "top" }}
+                        label={{ value: "Titik temu pertama", fontSize: 11, fill: RUST, position: takeover.firstMeetMonth > takeover.horizon / 2 ? "insideTopRight" : "insideTopLeft" }}
                       />
                     )}
                     {takeover.lastMeetMonth !== null &&
@@ -804,7 +869,7 @@ export default function StepMortgageCalculator() {
                           x={Math.round(takeover.lastMeetMonth)}
                           stroke={TEAL}
                           strokeDasharray="3 3"
-                          label={{ value: "Titik temu terakhir", fontSize: 11, fill: TEAL, position: "top" }}
+                          label={{ value: "Titik temu terakhir", fontSize: 11, fill: TEAL, position: takeover.lastMeetMonth > takeover.horizon / 2 ? "insideBottomRight" : "insideBottomLeft" }}
                         />
                       )}
                     <Line type="monotone" dataKey="baru" name="Skema baru" stroke={BRASS} dot={false} strokeWidth={2} />
@@ -845,7 +910,7 @@ export default function StepMortgageCalculator() {
                 </div>
 
                 <div
-                  className="grid grid-cols-2 gap-y-2 gap-x-6 text-sm mt-5 pt-5"
+                  className="grid kv gap-y-2 text-sm mt-5 pt-5"
                   style={{ borderTop: `1px solid ${HAIRLINE}` }}
                 >
                   {customPlafon && (
@@ -916,7 +981,7 @@ export default function StepMortgageCalculator() {
             <div>
               <button
                 onClick={() => setShowSchedule((v) => !v)}
-                className="text-xs flex items-center gap-1"
+                className="text-xs flex items-center gap-1 calc-btn"
                 style={{ color: TEAL }}
               >
                 {showSchedule ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
